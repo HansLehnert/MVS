@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <opencv2\opencv.hpp>
 
 namespace mvs {
@@ -20,7 +21,25 @@ namespace mvs {
 		cv::Mat P;
 	};
 
+
+	struct Feature {
+		View* source;
+		cv::Point2d position;
+		cv::Point3d normal;
+	};
+
+
 	cv::Point3d getCameraPosition(View*);
+
+
+	cv::Point3d getCameraOrientation(View*);
+
+
+	std::vector<View*> findClosest(std::vector<View*>*, View*, int);
+
+
 	Ray3 castRay(View*, cv::Point2d);
+
+
 	Ray2 projectRay(View*, Ray3);
 }

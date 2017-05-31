@@ -1,5 +1,7 @@
 #include "basic.h"
 
+#include <limits>
+
 using namespace mvs;
 
 
@@ -15,6 +17,35 @@ cv::Point3d mvs::getCameraPosition(View* view) {
 	position.z = result.at<double>(2);
 
 	return position;
+}
+
+
+cv::Point3d mvs::getCameraOrientation(View* view) {
+	cv::Point3d result;
+	result.x = view->P.at<double>(2, 0);
+	result.y = view->P.at<double>(2, 1);
+	result.z = view->P.at<double>(2, 2);
+
+	result /= cv::sqrt(result.dot(result));
+
+	return result;
+}
+
+
+std::vector<View*> mvs::findClosest(std::vector<View*>* views, View* target, int count) {
+	cv::Point3d c1 = getCameraPosition(target);
+
+	std::vector<float> distance(count, std::numeric_limits<float>::infinity());
+	std::vector<View*> result(count);
+
+	for (auto& view : *views) {
+		if (view == target)
+			continue;
+
+		//...
+	}
+
+	return result;
 }
 
 
@@ -34,7 +65,7 @@ Ray3 mvs::castRay(View* view, cv::Point2d point) {
 	Ray3 result;
 	result.start = camera_center;
 	result.direction = n2.cross(n1);
-	result.direction = result.direction / cv::sqrt(result.direction.dot(result.direction));
+	result.direction /= cv::sqrt(result.direction.dot(result.direction));
 
 	return result;
 }
@@ -61,6 +92,7 @@ Ray2 mvs::projectRay(View* view, Ray3 ray) {
 
 	result.direction.x = result.start.x - points_t.at<double>(0, 1) / points_t.at<double>(2, 1);
 	result.direction.y = result.start.y - points_t.at<double>(1, 1) / points_t.at<double>(2, 1);
+	//result.direction /= cv::sqrt(result.direction.dot(result.direction));
 
 	return result;
 }
