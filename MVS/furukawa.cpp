@@ -1,7 +1,10 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
+#include <time.h>
+
 #include <Windows.h>
 
 #include <opencv2\opencv.hpp>
@@ -14,6 +17,7 @@ const int BETA_1 = 3;  //Grid size for ...
 const int BETA_2 = 32; //Grid size for feature extraction
 const int ETA = 4;     //Features per grid cell
 const int MU = 5;      //Size of the grid used for photoconsistency calculation
+const int GAMMA = 3;   //Amount of photoconsistent patches needed for detection
 const double ALPHA_0 = 0.4;
 const double ALPHA_1 = 0.7;
 
@@ -52,6 +56,15 @@ void loadView(mvs::View* view, std::string scan, int index) {
 }
 
 
+void printTime() {
+	static time_t start_time = time(0);
+	int elapsed_time = difftime(time(0), start_time);
+	std::cout << "[" << std::setfill('0') << std::setw(2) << elapsed_time / 3600 << ":"
+		<< std::setfill('0') << std::setw(2) << elapsed_time % 3600 / 60 << ":"
+		<< std::setfill('0') << std::setw(2) << elapsed_time % 60 << "]\t";
+}
+
+
 int main(int argc, char* argv[]) {
 	cv::Mat display_image;
 
@@ -59,16 +72,28 @@ int main(int argc, char* argv[]) {
 
 	//Load images and cameras
 	std::vector<mvs::View*> views;
-	for (int i = 9; i <= 10; i++) {
-		views.push_back(new mvs::View);
-		loadView(views.back(), "scan6", i);
+	for (int i = 1; i <= 15; i++) {
+		printTime();
+		std::cout << "Loading view " << i << "..." << std::endl;
+
+		mvs::View* view = new mvs::View;
+		loadView(view, "scan6", i);
+		view->S.resize(view->img.cols / BETA_1 * view->img.rows / BETA_1);
+		view->C.resize(view->img.cols / BETA_1 * view->img.rows / BETA_1);
+		
+		views.push_back(view);
 	}
 
-	display_image = cv::Mat(views[0]->img.rows, views[0]->img.cols * 2, CV_8UC3);
-	views[0]->img.copyTo(display_image(cv::Rect(0, 0, 1600, 1200)));
-	views[1]->img.copyTo(display_image(cv::Rect(1600, 0, 1600, 1200)));
+	//Display views side by side
+	//display_image = cv::Mat(views[0]->img.rows, views[0]->img.cols * 2, CV_8UC3);
+	//views[0]->img.copyTo(display_image(cv::Rect(0, 0, 1600, 1200)));
+	//views[1]->img.copyTo(display_image(cv::Rect(1600, 0, 1600, 1200)));
+	display_image = views[0]->img;
+
 
 	//Find features
+	printTime();
+	std::cout << "Extracting features." << std::endl;
 	std::map<mvs::View*, std::vector<mvs::Feature>> features;
 	std::map<mvs::View*, cv::Mat> feature_map;
 	for (auto view : views) {
@@ -115,8 +140,8 @@ int main(int argc, char* argv[]) {
 				for (int k = 0; k < ETA; k++) {
 					if (max_values[k] > 1e-7) {
 						mvs::Feature detected_feature;
-						detected_feature.source = view;
-						detected_feature.position = cell_features[k];
+						detected_feature.src = view;
+						detected_feature.pos = cell_features[k];
 
 						features[view].push_back(detected_feature);
 						feature_map[view].at<unsigned char>(cell_features[k]) = 255;
@@ -130,9 +155,17 @@ int main(int argc, char* argv[]) {
 	}
 
 	//Match features
+	printTime();
+	std::cout << "Initial feature match." << std::endl;
 	std::map<mvs::View*, cv::Mat> depth_maps;
 	std::vector<std::pair<double, mvs::Feature*>> matches;
-	for (auto view : views) {
+	std::vector<mvs::Patch> patches;
+	for (int i = 1; i <= views.size(); i++) {
+		printTime();
+		std::cout << "Matching view " << i << "..." << std::endl;
+
+		mvs::View* view = views[i - 1];
+
 		int rows = view->img.rows;
 		int cols = view->img.cols;
 
@@ -143,9 +176,14 @@ int main(int argc, char* argv[]) {
 
 		//Iterate over ever detected feature
 		for (auto& feature : features[view]) {
-			mvs::Ray3 ray = mvs::castRay(view, feature.position);
+			int cell = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * view->img.rows / BETA_1;
+			if (!view->C[cell].empty()) {
+				continue;
+			}
+			
+			mvs::Ray3 ray = mvs::castRay(view, feature.pos);
 			feature.normal = -ray.direction;
-			ray.direction /= camera_front.dot(ray.direction);
+			ray.direction /= camera_front.ddot(ray.direction);
 
 			matches.clear();
 
@@ -155,14 +193,14 @@ int main(int argc, char* argv[]) {
 					continue;
 
 				mvs::Ray2 projected_ray = mvs::projectRay(neighbor, ray);
-				double ray_magnitude = sqrt(projected_ray.direction.dot(projected_ray.direction));
+				double ray_magnitude = sqrt(projected_ray.direction.ddot(projected_ray.direction));
 
 
 				for (auto& match : features[neighbor]) {
-					double dist = (match.position - projected_ray.start).cross(projected_ray.direction) / ray_magnitude;
+					double dist = (match.pos - projected_ray.start).cross(projected_ray.direction) / ray_magnitude;
 					//Check if distance to projected ray is less than 2
 					if (dist <= 2 && dist >= -2) {
-						double depth = (match.position.x - projected_ray.start.x) / projected_ray.direction.x; //Approximation
+						double depth = (match.pos.x - projected_ray.start.x) / projected_ray.direction.x; //Not the real depth
 						matches.push_back(std::pair<double, mvs::Feature*>(depth, &match));
 					}
 				}
@@ -178,17 +216,23 @@ int main(int argc, char* argv[]) {
 			});
 
 			//Find the projections of the feature ROI
-			cv::Vec3b source_pixels[MU * MU];
+			/*cv::Vec3b source_pixels[MU * MU];
 			mvs::Ray3 grid_rays[MU * MU];
+			cv::Point3d grid_points[MU * MU];
 
 			for (int i = 0; i < MU * MU; i++) {
 				cv::Point pos = cv::Point((int)feature.position.x - 1 + (i % MU), (int)feature.position.y - 1 + (i / 3));
 				grid_rays[i] = mvs::castRay(view, cv::Point2f(pos));
-				grid_rays[i].direction /= camera_front.dot(grid_rays[i].direction);
+				grid_rays[i].direction /= camera_front.ddot(grid_rays[i].direction);
 				source_pixels[i] = view->img.at<cv::Vec3b>(pos);
 			}
 
+			//Find photoconsistent match
 			for (auto& match : matches) {
+				//Get global coordinates of pixel grid
+				for (int i = 0; i < MU * MU; i++) {
+					grid_points[i] = grid_rays[i].start + match.first * grid_rays[i].direction;
+				}
 
 				for (auto neighbor : views) {
 					if (view == neighbor)
@@ -199,8 +243,6 @@ int main(int argc, char* argv[]) {
 					for (int i = 0; i < MU * MU; i++) {
 						mvs::Ray2 projected_ray = projectRay(neighbor, grid_rays[i]);
 						cv::Point projected_point = projected_ray.start + match.first * projected_ray.direction;
-
-						projected_pixels[i] = mvs::bilinearSample(&neighbor->img, projected_point);
 					}
 
 					double ncc_score = mvs::ncc<MU>(source_pixels, projected_pixels);
@@ -215,12 +257,128 @@ int main(int argc, char* argv[]) {
 						break;
 					}
 				}
+			}*/
+
+			//Find photoconsistent match
+			mvs::Ray3 ray_h = mvs::castRay(view, feature.pos + cv::Point2d(1, 0));
+			mvs::Ray3 ray_v = mvs::castRay(view, feature.pos + cv::Point2d(0, 1));
+			ray_h.direction /= camera_front.ddot(ray_h.direction);
+			ray_v.direction /= camera_front.ddot(ray_v.direction);
+
+			int n = 0;
+			for (auto& match : matches) {
+				mvs::Patch patch;
+				patch.source = view;
+				patch.normal = -camera_front;
+				patch.position = mvs::triangulate(feature.src, feature.pos, match.second->src, match.second->pos);
+
+				patch.tangent_1 = ((patch.position - ray.start).ddot(camera_front) * ray_h.direction + ray.start - patch.position) * 1.4;
+				patch.tangent_2 = ((patch.position - ray.start).ddot(camera_front) * ray_v.direction + ray.start - patch.position) * 1.4;
+
+				patch.T.push_back(view);
+				patch.S.push_back(view);
+
+				for (auto& neighbor : views) {
+					if (neighbor == view)
+						continue;
+
+					double ncc_score = mvs::ncc<MU>(&patch, view, neighbor);
+
+					if (ncc_score > ALPHA_0) {
+						patch.S.push_back(neighbor);
+					}
+					if (ncc_score > ALPHA_1) {
+						patch.T.push_back(neighbor);
+					}
+				}
+
+				if (patch.T.size() >= GAMMA) {
+					//Refine patch normal
+					patch.optimize();
+
+					patches.push_back(patch);
+
+					for (auto neighbor : patch.T) {
+						cv::Point2d projection = mvs::projectPoint(neighbor, patch.position);
+						int cell_index = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * view->img.rows / BETA_1;
+						neighbor->C[cell_index].push_back(&patches.back());
+					}
+					break;
+				}
 			}
 		}
 
-		break;
+		std::cout << "\t\tFinished. Total patches: " << patches.size() << std::endl;
+
+
+		if (i == 2) {
+			break;
+		}
+	}
+
+
+	//Write output file
+	printTime();
+	std::cout << "Writing PLY file..." << std::endl;
+	std::ofstream output_file("output.ply", std::ios::binary);
+	if (output_file.is_open()) {
+		output_file << "ply" << std::endl;
+		output_file << "format binary_little_endian 1.0" << std::endl;
+		output_file << "element vertex " << patches.size() << std::endl;
+		output_file << "property float x" << std::endl;
+		output_file << "property float y" << std::endl;
+		output_file << "property float z" << std::endl;
+		output_file << "property uchar red" << std::endl;
+		output_file << "property uchar green" << std::endl;
+		output_file << "property uchar blue" << std::endl;
+		output_file << "element face 0" << std::endl;
+		output_file << "property list uchar int vertex_indices" << std::endl;
+		output_file << "end_header" << std::endl;
+
+		float mean_x = 0;
+		float mean_y = 0;
+		float mean_z = 0;
+		//float max = 0;
+		for (auto& patch : patches) {
+			mean_x += patch.position.x;
+			mean_y += patch.position.y;
+			mean_z += patch.position.z;
+		}
+
+		mean_x /= patches.size();
+		mean_y /= patches.size();
+		mean_z /= patches.size();
+
+		for (auto& patch : patches) {
+			cv::Vec3b color = mvs::bilinearSample(&patch.source->img, mvs::projectPoint(patch.source, patch.position));
+
+			float x = patch.position.x - mean_x;
+			float y = patch.position.y - mean_y;
+			float z = patch.position.z - mean_z;
+
+			output_file.write(reinterpret_cast<const char*>(&x), sizeof(x));
+			output_file.write(reinterpret_cast<const char*>(&y), sizeof(y));
+			output_file.write(reinterpret_cast<const char*>(&z), sizeof(z));
+			output_file.write((const char*)&color[2], 1);
+			output_file.write((const char*)&color[1], 1);
+			output_file.write((const char*)&color[0], 1);
+		}
+
+		output_file.close();
+		std::cout << "\t\tFinished." << std::endl;
+	}
+	else {
+		std::cout << "\t\tFailed to write file.";
 	}
 	
+
+	//Draw patches
+	for (auto& patch : patches) {
+		cv::circle(display_image, mvs::projectPoint(views[0], patch.position), 4, cv::Scalar(0, 0, 255), 2);
+		cv::line(display_image, mvs::projectPoint(views[0], patch.position), mvs::projectPoint(views[0], patch.position + 10 * patch.normal), cv::Scalar(255), 2);
+	}
+
+
 	//Create window
 	const char* window_name = "Output";
 	int cv_window = cvNamedWindow(window_name);
@@ -229,13 +387,18 @@ int main(int argc, char* argv[]) {
 	if (!display_image.empty()) {
 		cv::Mat resized_display_image;
 		//cv::resize(display_image, resized_display_image, cv::Size(0, 0), 1, 1);
-		cv::resize(display_image, resized_display_image, cv::Size(0, 0), 0.3, 0.3);
+		cv::resize(display_image, resized_display_image, cv::Size(0, 0), 0.5, 0.5);
 		cv::imshow(window_name, resized_display_image);
 
 		while (IsWindowVisible(h_window)) {
 			if (cv::waitKey(10) != -1)
 				break;
 		}
+	}
+
+	//Delete loaded views
+	for (auto view : views) {
+		delete view;
 	}
 
 	return 0;

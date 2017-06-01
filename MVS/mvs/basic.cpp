@@ -49,6 +49,68 @@ std::vector<View*> mvs::findClosest(std::vector<View*>* views, View* target, int
 }
 
 
+cv::Point3d mvs::triangulate(View* src1, cv::Point2d p1, View* src2, cv::Point2d p2) {
+	cv::Mat a = cv::Mat(4, 3, CV_64F);
+	cv::Mat b = cv::Mat(4, 1, CV_64F);
+
+	a.at<double>(0, 0) = src1->P.at<double>(2, 0) * p1.x - src1->P.at<double>(0, 0);
+	a.at<double>(0, 1) = src1->P.at<double>(2, 1) * p1.x - src1->P.at<double>(0, 1);
+	a.at<double>(0, 2) = src1->P.at<double>(2, 2) * p1.x - src1->P.at<double>(0, 2);
+	a.at<double>(1, 0) = src1->P.at<double>(2, 0) * p1.y - src1->P.at<double>(1, 0);
+	a.at<double>(1, 1) = src1->P.at<double>(2, 1) * p1.y - src1->P.at<double>(1, 1);
+	a.at<double>(1, 2) = src1->P.at<double>(2, 2) * p1.y - src1->P.at<double>(1, 2);
+	a.at<double>(2, 0) = src2->P.at<double>(2, 0) * p2.x - src2->P.at<double>(0, 0);
+	a.at<double>(2, 1) = src2->P.at<double>(2, 1) * p2.x - src2->P.at<double>(0, 1);
+	a.at<double>(2, 2) = src2->P.at<double>(2, 2) * p2.x - src2->P.at<double>(0, 2);
+	a.at<double>(3, 0) = src2->P.at<double>(2, 0) * p2.y - src2->P.at<double>(1, 0);
+	a.at<double>(3, 1) = src2->P.at<double>(2, 1) * p2.y - src2->P.at<double>(1, 1);
+	a.at<double>(3, 2) = src2->P.at<double>(2, 2) * p2.y - src2->P.at<double>(1, 2);
+
+	b.at<double>(0, 0) = -src1->P.at<double>(2, 3) * p1.x + src1->P.at<double>(0, 3);
+	b.at<double>(1, 0) = -src1->P.at<double>(2, 3) * p1.y + src1->P.at<double>(1, 3);
+	b.at<double>(2, 0) = -src2->P.at<double>(2, 3) * p2.x + src2->P.at<double>(0, 3);
+	b.at<double>(3, 0) = -src2->P.at<double>(2, 3) * p2.y + src2->P.at<double>(1, 3);
+
+	cv::Mat aT;
+	cv::transpose(a, aT);
+
+	cv::Mat result = (aT * a).inv() * aT * b;
+
+	cv::Point3d point;
+	point.x = result.at<double>(0, 0);
+	point.y = result.at<double>(1, 0);
+	point.z = result.at<double>(2, 0);
+
+	return point;
+}
+
+
+cv::Vec3d mvs::rotateVector(cv::Vec3d base, cv::Vec3d axis, double angle) {
+	//Rodrigues rotation formula
+	return base * cos(angle) + axis.cross(base) * sin(angle) + axis * base.dot(axis) * (1 - cos(angle));
+}
+
+
+cv::Point2d mvs::projectPoint(View* view, cv::Point3d point) {
+	double x_t = view->P.at<double>(0, 0) * point.x
+		+ view->P.at<double>(0, 1) * point.y
+		+ view->P.at<double>(0, 2) * point.z
+		+ view->P.at<double>(0, 3);
+
+	double y_t = view->P.at<double>(1, 0) * point.x
+		+ view->P.at<double>(1, 1) * point.y
+		+ view->P.at<double>(1, 2) * point.z
+		+ view->P.at<double>(1, 3);
+
+	double t = view->P.at<double>(2, 0) * point.x
+		+ view->P.at<double>(2, 1) * point.y
+		+ view->P.at<double>(2, 2) * point.z
+		+ view->P.at<double>(2, 3);
+
+	return cv::Point2d(x_t / t, y_t / t);
+}
+
+
 Ray3 mvs::castRay(View* view, cv::Point2d point) {
 	cv::Point3d camera_center = getCameraPosition(view);
 

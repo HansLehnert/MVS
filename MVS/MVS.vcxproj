@@ -147,10 +147,12 @@
   <ItemGroup>
     <ClCompile Include="furukawa.cpp" />
     <ClCompile Include="mvs\basic.cpp" />
+    <ClCompile Include="mvs\Patch.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mvs\basic.h" />
     <ClInclude Include="mvs\mvs.h" />
+    <ClInclude Include="mvs\Patch.h" />
     <ClInclude Include="mvs\photoconsistency.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

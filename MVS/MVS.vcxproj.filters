@@ -21,6 +21,9 @@
     <ClCompile Include="furukawa.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="mvs\Patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mvs\basic.h">
@@ -30,6 +33,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="mvs\photoconsistency.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mvs\Patch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
