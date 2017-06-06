@@ -187,36 +187,156 @@ GLuint loadShader(const char* src, GLuint type) {
 
 
 int main(int argc, char* argv[]) {
-	if (argc < 3) {
-		std::cout << "MVS reconstruction evaluation" << std::endl << std::endl;
+	if (argc < 2) {
+		std::cout << "Point cloud viewer" << std::endl << std::endl;
 		std::cout << "Usage" << std::endl;
-		std::cout << '\t' << argv[0] << "reference_file evaluated_file" << std::endl;
+		std::cout << '\t' << argv[0] << "ply_file" << std::endl;
 		return 0;
 	}
 
 	///////////////////////////////////////////////////////////////////////////
 	//Load models
 
-	ModelLayout reference_layout;
-	ModelLayout test_layout;
-	std::vector<unsigned char> reference_data;
-	std::vector<unsigned char> test_data;
+	ModelLayout model_layout;
+	std::vector<unsigned char> model_data;
 
 	std::cout << "Loading reference model" << std::endl;
-	if (!loadPly(argv[1], &reference_data, &reference_layout)) {
+	if (!loadPly(argv[1], &model_data, &model_layout)) {
 		std::cout << "Failed to load reference model" << std::endl;
 		return 0;
 	}
 
+	///////////////////////////////////////////////////////////////////////////
+	//OpenGL setup
 
-	std::cout << "Loading test model" << std::endl;
-	if (!loadPly(argv[1], &test_data, &test_layout)) {
-		std::cout << "Failed to load test model" << std::endl;
+	//SDL initialization
+	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+		std::cout << "Failed to initialize SDL" << std::endl;
 		return 0;
 	}
 
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+
+	//Window size
+	int window_width = 600;
+	int window_height = 600;
+
+	//Window and context creation
+	SDL_Window* window = SDL_CreateWindow("Model viewer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, window_width, window_height, SDL_WINDOW_OPENGL);
+	SDL_GLContext context;
+	if ((context = SDL_GL_CreateContext(window)) == 0) {
+		std::cout << "Failed to create context" << std::endl;
+		return 0;
+	}
+
+	glewExperimental = GL_TRUE;
+	if (glewInit() != GLEW_OK) {
+		std::cout << "GLEW init failed." << std::endl;
+		return 0;
+	}
+
+	//GL configuration
+	glClearColor(0, 0, 0, 0);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+
+	glEnable(GL_PROGRAM_POINT_SIZE);
+
+	GLuint null_vao;
+	glGenVertexArrays(1, &null_vao);
+	glBindVertexArray(null_vao);
+
+	//Load shaders
+	GLuint program = glCreateProgram();
+	GLuint vertex_shader = loadShader(vertex_shader_src, GL_VERTEX_SHADER);
+	GLuint fragment_shader = loadShader(fragment_shader_src, GL_FRAGMENT_SHADER);
+	glAttachShader(program, vertex_shader);
+	glAttachShader(program, fragment_shader);
+	glLinkProgram(program);
+	glDetachShader(program, vertex_shader);
+	glDetachShader(program, fragment_shader);
+	glDeleteShader(vertex_shader);
+	glDeleteShader(fragment_shader);
+	glUseProgram(program);
+
+	//Load models
+	GLuint model_buffer[2];
+	glGenBuffers(2, model_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, model_buffer[0]);
+	glBufferData(GL_ARRAY_BUFFER, model_data.size(), &(model_data[0]), GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, model_layout.vertex_size, (void*)model_layout.x_offset);
+	glVertexAttribPointer(1, 3, GL_UNSIGNED_BYTE, GL_TRUE, model_layout.vertex_size, (void*)model_layout.r_offset);
+
+	//Model parameters
+	float yaw = 0;
+	float pitch = 0;
+	float pan = 0;
+	float scale = 0;
+	bool pan_active = false;
+
+
+	GLuint model_matrix_loc = glGetUniformLocation(program, "model_matrix");
+
 	///////////////////////////////////////////////////////////////////////////
-	//Evaluation code
+	//Program loop
+
+	bool should_exit = false;
+	while (!should_exit) {
+		SDL_GL_SwapWindow(window);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		//Poll input evenys
+		SDL_Event sdl_event;
+		while (SDL_PollEvent(&sdl_event)) {
+			switch (sdl_event.type) {
+			case SDL_QUIT:
+				should_exit = true;
+				break;
+
+			case SDL_MOUSEWHEEL:
+				scale += sdl_event.wheel.y;
+				break;
+
+			case SDL_MOUSEBUTTONDOWN:
+				if (sdl_event.button.button == SDL_BUTTON_LEFT)
+					pan_active = true;
+				break;
+
+			case SDL_MOUSEBUTTONUP:
+				if (sdl_event.button.button == SDL_BUTTON_LEFT)
+					pan_active = false;
+				break;
+
+			case SDL_MOUSEMOTION:
+				if (pan_active) {
+					pan += sdl_event.motion.yrel;
+				}
+				else {
+					yaw = 360 * sdl_event.motion.x / window_width;
+					pitch = 180 * ((float)sdl_event.motion.y / window_height);
+				}
+				break;
+
+			}
+		}
+
+		//Calculate model matrix
+		glm::mat4 model_matrix = glm::translate(glm::vec3(0, 0, pan));;
+		model_matrix = glm::scale(glm::vec3(exp(scale * 0.5))) * model_matrix;
+		model_matrix = glm::rotate(yaw, glm::vec3(0, 0, 1)) * model_matrix;
+		model_matrix = glm::rotate(pitch, glm::vec3(1, 0, 0)) * model_matrix;
+
+		//Draw model
+		//glUseProgram(program);
+		//glBindBuffer(GL_ARRAY_BUFFER, model_buffer[0]);
+		glUniformMatrix4fv(model_matrix_loc, 1, GL_FALSE, (GLfloat*)&model_matrix);
+		glDrawArrays(GL_POINTS, 0, model_data.size() / model_layout.vertex_size);
+	}
 
 	return 0;
 }
