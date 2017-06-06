@@ -23,7 +23,7 @@ const double ALPHA_1 = 0.7;
 
 //Additional parameters
 
-const int IMAGE_BORDER = 100;
+const int IMAGE_BORDER = 20;
 
 //Loads an image and a projection matrix from the SampleSet
 void loadView(mvs::View* view, std::string scan, int index) {
@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
 
 	//Load images and cameras
 	std::vector<mvs::View*> views;
-	for (int i = 1; i <= 15; i++) {
+	for (int i = 21; i <= 30; i++) {
 		printTime();
 		std::cout << "Loading view " << i << "..." << std::endl;
 
@@ -84,18 +84,77 @@ int main(int argc, char* argv[]) {
 		views.push_back(view);
 	}
 
-	//Display views side by side
-	//display_image = cv::Mat(views[0]->img.rows, views[0]->img.cols * 2, CV_8UC3);
-	//views[0]->img.copyTo(display_image(cv::Rect(0, 0, 1600, 1200)));
-	//views[1]->img.copyTo(display_image(cv::Rect(1600, 0, 1600, 1200)));
-	display_image = views[0]->img;
+	/*if (argc < 2) {
+		std::cout << "Missing input folder";
+		return 0;
+	}
+
+	std::vector<mvs::View*> views;
+
+	//Load views from bundler output
+	std::string input_dir = argv[1];
+	if (input_dir.back() != '/' || input_dir.back() != '\\')
+		input_dir += '/';
+	
+	std::ifstream bundle_file(input_dir + std::string("bundle/bundle.out"));
+	std::ifstream list_file(input_dir + std::string("prepare/list.txt"));
+
+	if (!list_file.is_open() || !bundle_file.is_open()) {
+		std::cout << "Failed to open bundler files";
+		return 0;
+	}
+
+	bundle_file.ignore(1024, '\n');
+
+	int n;
+	bundle_file >> n;
+	bundle_file.ignore(1024, '\n');
+
+	for (int i = 0; i < n; i++) {
+		mvs::View* view = new mvs::View;
+
+		std::string img_filename;
+		list_file >> img_filename;
+		list_file.ignore(1024, '\n');
+
+		printTime();
+		std::cout << "Loading view " << img_filename << " ..." << std::endl;
+
+		//Load image
+		img_filename = input_dir + img_filename;
+		view->img = cv::imread(img_filename);
+
+		bundle_file.ignore(1024, '\n');
+
+		//Load focal length
+		cv::Mat perspective_mat(3, 3, CV_64F);
+		double focal_length;
+		bundle_file >> focal_length;
+		perspective_mat = 0;
+		perspective_mat.at<double>(0, 0) = focal_length;
+		perspective_mat.at<double>(1, 1) = focal_length;
+		perspective_mat.at<double>(2, 2) = 1;
+		
+		//Load camera location
+		cv::Mat pose_mat(3, 4, CV_64F);
+		bundle_file >> pose_mat.at<double>(0, 0) >> pose_mat.at<double>(0, 1) >> pose_mat.at<double>(0, 2);
+		bundle_file >> pose_mat.at<double>(1, 0) >> pose_mat.at<double>(1, 1) >> pose_mat.at<double>(1, 2);
+		bundle_file >> pose_mat.at<double>(2, 0) >> pose_mat.at<double>(2, 1) >> pose_mat.at<double>(2, 2);
+		bundle_file >> pose_mat.at<double>(0, 3) >> pose_mat.at<double>(1, 3) >> pose_mat.at<double>(2, 3);
+
+		view->P = perspective_mat * pose_mat;
+
+		view->S.resize(view->img.cols / BETA_1 * view->img.rows / BETA_1);
+		view->C.resize(view->img.cols / BETA_1 * view->img.rows / BETA_1);
+
+		views.push_back(view);
+	}*/
 
 
 	//Find features
 	printTime();
 	std::cout << "Extracting features." << std::endl;
 	std::map<mvs::View*, std::vector<mvs::Feature>> features;
-	std::map<mvs::View*, cv::Mat> feature_map;
 	for (auto view : views) {
 		cv::Mat grayscale_img;
 		cv::cvtColor(view->img, grayscale_img, cv::COLOR_BGR2GRAY);
@@ -104,8 +163,6 @@ int main(int argc, char* argv[]) {
 		cv::cornerHarris(grayscale_img, harris_img, 3, 3, 0.06);
 
 		//Divide image in cells and extract features
-		feature_map[view] = cv::Mat(view->img.rows, view->img.cols, CV_8U);
-		feature_map[view] = 0;
 		features[view].reserve(view->img.cols * view->img.rows * ETA / BETA_2 / BETA_2);
 		for (int i = 0; i < (view->img.rows - 2 * IMAGE_BORDER) / BETA_2; i++) {
 			for (int j = 0; j < (view->img.cols - 2 * IMAGE_BORDER) / BETA_2; j++) {
@@ -144,7 +201,6 @@ int main(int argc, char* argv[]) {
 						detected_feature.pos = cell_features[k];
 
 						features[view].push_back(detected_feature);
-						feature_map[view].at<unsigned char>(cell_features[k]) = 255;
 					}
 					else {
 						break;
@@ -169,14 +225,11 @@ int main(int argc, char* argv[]) {
 		int rows = view->img.rows;
 		int cols = view->img.cols;
 
-		//cv::Vec3d camera_front = mvs::castRay(view, cv::Point2d((cols - 1) / 2, (rows - 1) / 2)).direction;
 		cv::Vec3d camera_front = mvs::getCameraOrientation(view);
-
-		//features[view] = std::vector<mvs::Feature>(1, features[view][900]);
 
 		//Iterate over ever detected feature
 		for (auto& feature : features[view]) {
-			int cell = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * view->img.rows / BETA_1;
+			int cell = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * rows / BETA_1;
 			if (!view->C[cell].empty()) {
 				continue;
 			}
@@ -215,50 +268,6 @@ int main(int argc, char* argv[]) {
 				return a.first < b.first;
 			});
 
-			//Find the projections of the feature ROI
-			/*cv::Vec3b source_pixels[MU * MU];
-			mvs::Ray3 grid_rays[MU * MU];
-			cv::Point3d grid_points[MU * MU];
-
-			for (int i = 0; i < MU * MU; i++) {
-				cv::Point pos = cv::Point((int)feature.position.x - 1 + (i % MU), (int)feature.position.y - 1 + (i / 3));
-				grid_rays[i] = mvs::castRay(view, cv::Point2f(pos));
-				grid_rays[i].direction /= camera_front.ddot(grid_rays[i].direction);
-				source_pixels[i] = view->img.at<cv::Vec3b>(pos);
-			}
-
-			//Find photoconsistent match
-			for (auto& match : matches) {
-				//Get global coordinates of pixel grid
-				for (int i = 0; i < MU * MU; i++) {
-					grid_points[i] = grid_rays[i].start + match.first * grid_rays[i].direction;
-				}
-
-				for (auto neighbor : views) {
-					if (view == neighbor)
-						continue;
-
-					cv::Vec3b projected_pixels[MU * MU];
-
-					for (int i = 0; i < MU * MU; i++) {
-						mvs::Ray2 projected_ray = projectRay(neighbor, grid_rays[i]);
-						cv::Point projected_point = projected_ray.start + match.first * projected_ray.direction;
-					}
-
-					double ncc_score = mvs::ncc<MU>(source_pixels, projected_pixels);
-
-					if (ncc_score > ALPHA_0) {
-						mvs::Ray2 projected_ray = projectRay(neighbor, ray);
-			
-						cv::circle(display_image, projected_ray.start + match.first * projected_ray.direction + cv::Point2d(1600, 0), 4, cv::Scalar(255), 2);
-						cv::circle(display_image, feature.position, 4, cv::Scalar(255), 2);
-						//cv::line(display_image, feature.position, projected_ray.start + match.first * projected_ray.direction + cv::Point2d(1600, 0), cv::Scalar(255), 2);
-						
-						break;
-					}
-				}
-			}*/
-
 			//Find photoconsistent match
 			mvs::Ray3 ray_h = mvs::castRay(view, feature.pos + cv::Point2d(1, 0));
 			mvs::Ray3 ray_v = mvs::castRay(view, feature.pos + cv::Point2d(0, 1));
@@ -269,11 +278,11 @@ int main(int argc, char* argv[]) {
 			for (auto& match : matches) {
 				mvs::Patch patch;
 				patch.source = view;
-				patch.normal = -camera_front;
+				patch.normal = -feature.normal;
 				patch.position = mvs::triangulate(feature.src, feature.pos, match.second->src, match.second->pos);
 
-				patch.tangent_1 = ((patch.position - ray.start).ddot(camera_front) * ray_h.direction + ray.start - patch.position) * 1.4;
-				patch.tangent_2 = ((patch.position - ray.start).ddot(camera_front) * ray_v.direction + ray.start - patch.position) * 1.4;
+				patch.tangent_1 = ((patch.position - ray.start).ddot(camera_front) * ray_h.direction + ray.start - patch.position) * 1.5;
+				patch.tangent_2 = ((patch.position - ray.start).ddot(camera_front) * ray_v.direction + ray.start - patch.position) * 1.5;
 
 				patch.T.push_back(view);
 				patch.S.push_back(view);
@@ -300,7 +309,7 @@ int main(int argc, char* argv[]) {
 
 					for (auto neighbor : patch.T) {
 						cv::Point2d projection = mvs::projectPoint(neighbor, patch.position);
-						int cell_index = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * view->img.rows / BETA_1;
+						int cell_index = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * rows / BETA_1;
 						neighbor->C[cell_index].push_back(&patches.back());
 					}
 					break;
@@ -310,10 +319,7 @@ int main(int argc, char* argv[]) {
 
 		std::cout << "\t\tFinished. Total patches: " << patches.size() << std::endl;
 
-
-		if (i == 2) {
-			break;
-		}
+		//break;
 	}
 
 
@@ -339,7 +345,7 @@ int main(int argc, char* argv[]) {
 		float mean_y = 0;
 		float mean_z = 0;
 		//float max = 0;
-		for (auto& patch : patches) {
+		/*for (auto& patch : patches) {
 			mean_x += patch.position.x;
 			mean_y += patch.position.y;
 			mean_z += patch.position.z;
@@ -347,7 +353,7 @@ int main(int argc, char* argv[]) {
 
 		mean_x /= patches.size();
 		mean_y /= patches.size();
-		mean_z /= patches.size();
+		mean_z /= patches.size();*/
 
 		for (auto& patch : patches) {
 			cv::Vec3b color = mvs::bilinearSample(&patch.source->img, mvs::projectPoint(patch.source, patch.position));
@@ -373,6 +379,7 @@ int main(int argc, char* argv[]) {
 	
 
 	//Draw patches
+	display_image = views[0]->img;
 	for (auto& patch : patches) {
 		cv::circle(display_image, mvs::projectPoint(views[0], patch.position), 4, cv::Scalar(0, 0, 255), 2);
 		cv::line(display_image, mvs::projectPoint(views[0], patch.position), mvs::projectPoint(views[0], patch.position + 10 * patch.normal), cv::Scalar(255), 2);
@@ -401,5 +408,7 @@ int main(int argc, char* argv[]) {
 		delete view;
 	}
 
-	return 0;
+	//std::cin.ignore();
+
+	return 1;
 }
