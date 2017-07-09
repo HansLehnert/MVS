@@ -14,7 +14,8 @@ const char* vertex_shader_src = R"glsl(
 #version 410
 
 layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 color;
+layout(location = 1) in vec3 normal;
+layout(location = 2) in vec3 color;
 
 out vec3 vertex_color;
 
@@ -22,8 +23,10 @@ uniform mat4 model_matrix;
 
 void main() {
 	gl_Position = model_matrix * vec4(position, 1);
+	//float difuse = dot(normalize((model_matrix * vec4(normal, 0)).xyz), vec3(1, 1, 1));
 	//gl_Position.z *= 0.001;
 	gl_PointSize = 3;
+	//vertex_color = color * (difuse + 1) / 2;
 	vertex_color = color;
 }
 
@@ -49,6 +52,9 @@ struct ModelLayout {
 	size_t x_offset;
 	size_t y_offset;
 	size_t z_offset;
+	size_t nx_offset;
+	size_t ny_offset;
+	size_t nz_offset;
 	size_t r_offset;
 	size_t g_offset;
 	size_t b_offset;
@@ -60,6 +66,9 @@ bool loadPly(std::string filename, std::vector<unsigned char>* model_data, Model
 	layout->x_offset = -1;
 	layout->y_offset = -1;
 	layout->z_offset = -1;
+	layout->nx_offset = -1;
+	layout->ny_offset = -1;
+	layout->nz_offset = -1;
 	layout->r_offset = -1;
 	layout->g_offset = -1;
 	layout->b_offset = -1;
@@ -130,6 +139,12 @@ bool loadPly(std::string filename, std::vector<unsigned char>* model_data, Model
 					layout->y_offset = layout->vertex_size;
 				else if (property_name == "z")
 					layout->z_offset = layout->vertex_size;
+				else if (property_name == "nx")
+					layout->nx_offset = layout->vertex_size;
+				else if (property_name == "ny")
+					layout->ny_offset = layout->vertex_size;
+				else if (property_name == "nz")
+					layout->nz_offset = layout->vertex_size;
 				else if (property_name == "r" || property_name == "red")
 					layout->r_offset = layout->vertex_size;
 				else if (property_name == "g" || property_name == "green")
@@ -269,8 +284,10 @@ int main(int argc, char* argv[]) {
 
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, model_layout.vertex_size, (void*)model_layout.x_offset);
-	glVertexAttribPointer(1, 3, GL_UNSIGNED_BYTE, GL_TRUE, model_layout.vertex_size, (void*)model_layout.r_offset);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, model_layout.vertex_size, (void*)model_layout.nx_offset);
+	glVertexAttribPointer(2, 3, GL_UNSIGNED_BYTE, GL_TRUE, model_layout.vertex_size, (void*)model_layout.r_offset);
 
 	//Model parameters
 	float yaw = 0;

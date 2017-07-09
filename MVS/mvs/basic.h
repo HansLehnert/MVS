@@ -5,8 +5,8 @@
 
 namespace mvs {
 	struct View;
-	struct Patch;
 	struct Feature;
+	class Patch;
 
 
 	struct Ray2 {
@@ -32,8 +32,8 @@ namespace mvs {
 		cv::Mat img;
 		cv::Mat P;
 
-		std::vector<std::vector<Patch*>> C;
-		std::vector<std::vector<Patch*>> S;
+		std::vector<std::vector<std::vector<Patch*>>> T;
+		std::vector<std::vector<std::vector<Patch*>>> S;
 	};
 	
 	
@@ -59,4 +59,7 @@ namespace mvs {
 
 
 	Ray2 projectRay(View*, Ray3);
+
+
+	cv::Point3d intersect(Ray3, Patch*);
 }

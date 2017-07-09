@@ -2,6 +2,8 @@
 
 #include <limits>
 
+#include "Patch.h"
+
 using namespace mvs;
 
 
@@ -157,4 +159,10 @@ Ray2 mvs::projectRay(View* view, Ray3 ray) {
 	//result.direction /= cv::sqrt(result.direction.dot(result.direction));
 
 	return result;
+}
+
+
+cv::Point3d mvs::intersect(Ray3 ray, Patch* patch) {
+	double k = (patch->position - ray.start).dot(patch->normal) / ray.direction.dot(patch->normal);
+	return ray.start + k * ray.direction;
 }

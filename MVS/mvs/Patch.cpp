@@ -1,5 +1,7 @@
 #include "Patch.h"
 
+#include <nlopt.hpp>
+
 #include "photoconsistency.h"
 
 
@@ -11,7 +13,8 @@ const int N_THETA[N_PHI] = {3, 5, 9, 13, 17, 20};
 const int N_POS = 5;
 
 void Patch::optimize() {
-	cv::Vec3d base_tangent_1(tangent_1);
+	//Fixed transformation optimization
+	/*cv::Vec3d base_tangent_1(tangent_1);
 	cv::Vec3d base_tangent_2(tangent_2);
 	cv::Vec3b norm_tangent_2 = base_tangent_2 / cv::sqrt(base_tangent_2.ddot(base_tangent_2));
 	cv::Vec3d base_position(position);
@@ -45,7 +48,7 @@ void Patch::optimize() {
 	tangent_1 = best_tangent_1;
 	tangent_2 = best_tangent_2;
 	normal = cv::Vec3d(tangent_1).cross(cv::Vec3d(tangent_2));
-	normal /= cv::sqrt(normal.ddot(normal));
+	normal /= cv::sqrt(normal.ddot(normal));*/
 
 
 	//Gradient optimization
@@ -86,16 +89,67 @@ void Patch::optimize() {
 
 	normal = cv::Vec3d(tangent_1).cross(cv::Vec3d(tangent_2));
 	normal /= cv::sqrt(normal.ddot(normal));*/
+
+	//External library optimization
+	std::vector<double> x(3, 0);
+	double max_val;
+
+	std::vector<double> lower_bounds = { 0, -CV_PI, -10.0 };
+	std::vector<double> upper_bounds = { CV_PI / 2, CV_PI, 10.0 };
+	//std::vector<double> initial_step = { 0.2, 0.2, 10.0 };
+
+	nlopt::opt opt(nlopt::LN_COBYLA, 3);
+	opt.set_max_objective(meanNcc, (void*)this);
+	opt.set_lower_bounds(lower_bounds);
+	opt.set_upper_bounds(upper_bounds);
+	opt.set_maxeval(30);
+	
+	nlopt::result result = opt.optimize(x, max_val);
+	
+	//Transform vector based on result
+	cv::Vec3d norm_tangent_2 = tangent_2 / cv::sqrt(tangent_2.ddot(tangent_2));
+	normal = tangent_1.cross(tangent_2);
+	normal /= cv::sqrt(normal.ddot(normal));
+
+	tangent_1 = rotateVector(tangent_1, norm_tangent_2, x[0]);
+	tangent_1 = rotateVector(tangent_1, normal, x[1]);
+	tangent_2 = rotateVector(tangent_2, normal, x[1]);
+	normal = tangent_1.cross(tangent_2);
+	normal /= cv::sqrt(normal.ddot(normal));
+
+	position += cv::Point3d(x[2] * projection_dir);
 }
 
 
-double Patch::meanNcc() {
+double mvs::Patch::meanNcc(unsigned n, const double * x, double * grad, void * func_data) {
+	Patch* patch = static_cast<Patch*>(func_data);
+
 	double result = 0;
 
-	for (auto view : T) {
-		if (view != source)
-			result += ncc<5>(this, source, view); //Wont work for different values of grid size
+	double phi = x[0];
+	double theta = x[1];
+	double offset = x[2];
+
+	//Calculate transformed plane tangents
+	cv::Vec3d norm_tangent_2 = patch->tangent_2 / cv::sqrt(patch->tangent_2.ddot(patch->tangent_2));
+	cv::Vec3d normal = patch->tangent_1.cross(patch->tangent_2);
+	normal /= cv::sqrt(normal.ddot(normal));
+
+	cv::Vec3d tangent_1 = rotateVector(patch->tangent_1, norm_tangent_2, phi);
+	tangent_1 = rotateVector(tangent_1, normal, theta);
+	
+	cv::Vec3d tangent_2 = rotateVector(patch->tangent_2, normal, theta);
+
+	//Generate grid for NCC evaluation
+	const int N = 5;
+	cv::Point3d grid[N * N];
+	for (int k = 0; k < 25; k++)
+		grid[k] = (patch->position + offset * cv::Point3d(patch->projection_dir)) + cv::Point3d(tangent_1 * (k / N - N / 2) + tangent_2 * (k % N - N / 2));
+
+	for (auto view : patch->T) {
+		if (view != patch->source)
+			result += ncc<5>(grid, patch->source, view); //Wont work for different values of grid size
 	}
 
-	return result / (T.size() - 1);
+	return result / (patch->T.size() - 1);
 }

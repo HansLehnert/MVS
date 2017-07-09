@@ -6,19 +6,22 @@
 #include "basic.h"
 
 namespace mvs {
-	struct Patch {
+	class Patch {
+	public:
 		View* source;
 		cv::Point3d position;
-		cv::Point3d normal;
-		cv::Point3d tangent_1;
-		cv::Point3d tangent_2;
+		cv::Vec3d normal;
+		cv::Vec3d projection_dir;
+		cv::Vec3d tangent_1;
+		cv::Vec3d tangent_2;
 
 		std::vector<View*> S;
 		std::vector<View*> T;
 
-		std::vector<cv::Point3d> grid_points;
-
 		void optimize();
-		double meanNcc();
+
+		static double meanNcc(unsigned n, const double* x, double* grad, void* func_data);
+	private:
+		std::vector<cv::Point3d> grid_points;
 	};
 }

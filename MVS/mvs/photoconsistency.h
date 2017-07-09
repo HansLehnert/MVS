@@ -66,13 +66,34 @@ namespace mvs {
 		cv::Vec3b t[N * N];
 
 		for (int k = 0; k < N * N; k++) {
-			cv::Point3d pos = p->position + p->tangent_1 * (k / N - N / 2) + p->tangent_2 * (k % N - N / 2);
+			cv::Point3d pos = p->position + cv::Point3d(p->tangent_1 * (k / N - N / 2) + p->tangent_2 * (k % N - N / 2));
 
 			cv::Point2d projection_i = mvs::projectPoint(i, pos);
 			if ((int)projection_i.x < 0 || (int)projection_i.x >= i->img.cols - 2 || (int)projection_i.y < 0 || (int)projection_i.y >= i->img.rows - 2)
 				return -1;
 
 			cv::Point2d projection_j = mvs::projectPoint(j, pos);
+			if ((int)projection_j.x < 0 || (int)projection_j.x >= j->img.cols - 2 || (int)projection_j.y < 0 || (int)projection_j.y >= j->img.rows - 2)
+				return -1;
+
+			f[k] = bilinearSample(&(i->img), projection_i);
+			t[k] = bilinearSample(&(j->img), projection_j);
+		}
+
+		return ncc<N>(f, t);
+	}
+
+
+	template <int N> inline double ncc(cv::Point3d* p, View* i, View* j) {
+		cv::Vec3b f[N * N];
+		cv::Vec3b t[N * N];
+
+		for (int k = 0; k < N * N; k++) {
+			cv::Point2d projection_i = mvs::projectPoint(i, p[k]);
+			if ((int)projection_i.x < 0 || (int)projection_i.x >= i->img.cols - 2 || (int)projection_i.y < 0 || (int)projection_i.y >= i->img.rows - 2)
+				return -1;
+
+			cv::Point2d projection_j = mvs::projectPoint(j, p[k]);
 			if ((int)projection_j.x < 0 || (int)projection_j.x >= j->img.cols - 2 || (int)projection_j.y < 0 || (int)projection_j.y >= j->img.rows - 2)
 				return -1;
 

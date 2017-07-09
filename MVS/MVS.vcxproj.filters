@@ -18,10 +18,10 @@
     <ClCompile Include="mvs\basic.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="furukawa.cpp">
+    <ClCompile Include="mvs\Patch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mvs\Patch.cpp">
+    <ClCompile Include="furukawa.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -36,6 +36,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="mvs\Patch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mvs\View.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

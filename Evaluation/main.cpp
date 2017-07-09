@@ -1,13 +1,9 @@
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <vector>
 #include <string>
-
-#include <GL/glew.h>
-#include <SDL.h>
-
-#include <glm\glm.hpp>
-#include <glm\gtx\transform.hpp>
+#include <ctime>
 
 //Shaders
 const char* vertex_shader_src = R"glsl(
@@ -162,27 +158,12 @@ bool loadPly(std::string filename, std::vector<unsigned char>* model_data, Model
 }
 
 
-GLuint loadShader(const char* src, GLuint type) {
-	GLuint shader = glCreateShader(type);
-	glShaderSource(shader, 1, &src, NULL);
-	glCompileShader(shader);
-
-	GLint success;
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-	if (success == GL_FALSE) {
-		GLint log_length;
-		GLchar* log_content;
-
-		glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
-		log_content = new GLchar[log_length];
-		glGetShaderInfoLog(shader, log_length, NULL, log_content);
-		std::cout << log_content << std::endl;
-		glDeleteShader(shader);
-		delete log_content;
-		return 0;
-	}
-
-	return shader;
+void printTime() {
+	static time_t start_time = time(0);
+	int elapsed_time = difftime(time(0), start_time);
+	std::cout << "[" << std::setfill('0') << std::setw(2) << elapsed_time / 3600 << ":"
+		<< std::setfill('0') << std::setw(2) << elapsed_time % 3600 / 60 << ":"
+		<< std::setfill('0') << std::setw(2) << elapsed_time % 60 << "]\t";
 }
 
 
@@ -202,21 +183,53 @@ int main(int argc, char* argv[]) {
 	std::vector<unsigned char> reference_data;
 	std::vector<unsigned char> test_data;
 
+	printTime();
 	std::cout << "Loading reference model" << std::endl;
 	if (!loadPly(argv[1], &reference_data, &reference_layout)) {
-		std::cout << "Failed to load reference model" << std::endl;
+		std::cout << "\t\tFailed to load reference model" << std::endl;
 		return 0;
 	}
 
-
+	printTime();
 	std::cout << "Loading test model" << std::endl;
-	if (!loadPly(argv[1], &test_data, &test_layout)) {
-		std::cout << "Failed to load test model" << std::endl;
+	if (!loadPly(argv[2], &test_data, &test_layout)) {
+		std::cout << "\t\tFailed to load test model" << std::endl;
 		return 0;
 	}
 
 	///////////////////////////////////////////////////////////////////////////
 	//Evaluation code
+
+	float max = 0;
+
+	for (int i = 0; i < test_layout.vertex_count; i++) {
+		float test_x = *((float*)&test_data[test_layout.vertex_size * i + test_layout.x_offset]);
+		float test_y = *((float*)&test_data[test_layout.vertex_size * i + test_layout.y_offset]);
+		float test_z = *((float*)&test_data[test_layout.vertex_size * i + test_layout.z_offset]);
+
+		for (int j = 0; j < reference_layout.vertex_count; j++) {
+			float ref_x = *((float*)&reference_data[reference_layout.vertex_size * j + reference_layout.x_offset]);
+			float ref_y = *((float*)&reference_data[reference_layout.vertex_size * j + reference_layout.y_offset]);
+			float ref_z = *((float*)&reference_data[reference_layout.vertex_size * j + reference_layout.z_offset]);
+
+			float distance = (test_x - ref_x) * (test_x - ref_x)
+				+ (test_y - ref_y) * (test_y - ref_y)
+				+ (test_z - ref_z) * (test_z - ref_z);
+			if (distance > max)
+				max = distance;
+		}
+
+		if (i % 1000 == 0) {
+			printTime();
+			std::cout << "Progress: " << i << "/" << test_layout.vertex_count << std::endl;
+		}
+	}
+
+	printTime();
+	std::cout << "Complete" << std::endl;
+	std::cout << "\t\tResult: " << max << std::endl;
+
+	std::cin.ignore();
 
 	return 0;
 }
