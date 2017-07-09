@@ -163,10 +163,10 @@ bool loadPly(std::string filename, std::vector<unsigned char>* model_data, Model
 	ply_file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 	model_data->resize(layout->vertex_size * layout->vertex_count);
 
-	int read_bytes = 0;
+	unsigned int read_bytes = 0;
 	while (read_bytes < model_data->size() && !ply_file.eof()) {
 		ply_file.read((char*)&(*model_data)[read_bytes], model_data->size() - read_bytes);
-		read_bytes += ply_file.gcount();
+		read_bytes += (unsigned int)ply_file.gcount();
 	}
 
 	if (read_bytes < model_data->size()) {
@@ -334,7 +334,7 @@ int main(int argc, char* argv[]) {
 					pan += sdl_event.motion.yrel;
 				}
 				else {
-					yaw = 360 * sdl_event.motion.x / window_width;
+					yaw = 360 * ((float)sdl_event.motion.x / window_width);
 					pitch = 180 * ((float)sdl_event.motion.y / window_height);
 				}
 				break;
@@ -344,7 +344,7 @@ int main(int argc, char* argv[]) {
 
 		//Calculate model matrix
 		glm::mat4 model_matrix = glm::translate(glm::vec3(0, 0, pan));;
-		model_matrix = glm::scale(glm::vec3(exp(scale * 0.5))) * model_matrix;
+		model_matrix = glm::scale(glm::vec3((float)exp(scale * 0.5))) * model_matrix;
 		model_matrix = glm::rotate(yaw, glm::vec3(0, 0, 1)) * model_matrix;
 		model_matrix = glm::rotate(pitch, glm::vec3(1, 0, 0)) * model_matrix;
 

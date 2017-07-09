@@ -19,7 +19,11 @@ namespace mvs {
 		std::vector<View*> T;
 
 		void optimize();
+		void findVisible(std::vector<View*>*, double);
+		void registerViews();
+		void remove();
 
+		double meanNcc();
 		static double meanNcc(unsigned n, const double* x, double* grad, void* func_data);
 	private:
 		std::vector<cv::Point3d> grid_points;

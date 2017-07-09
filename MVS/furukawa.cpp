@@ -27,7 +27,7 @@ const double ALPHA_1 = 0.7; //Strong match threshold
 const int IMAGE_BORDER = 20;
 
 //Loads an image and a projection matrix from the SampleSet
-void loadView(mvs::View* view, std::string scan, int index) {
+mvs::View* loadView(std::string scan, int index) {
 	//Load image data
 	std::stringstream image_path;
 	image_path << "D:/Hans/Documents/SampleSet/SampleSet/MVS Data/Rectified/"
@@ -35,25 +35,37 @@ void loadView(mvs::View* view, std::string scan, int index) {
 		<< std::setw(3) << std::setfill('0') << index
 		<< "_max.png";
 
-	view->img = cv::imread(image_path.str());
+	cv::Mat img = cv::imread(image_path.str());
+
+	if (img.empty()) {
+		std::cout << "Failed to open " << image_path.str() << std::endl;
+		return nullptr;
+	}
 
 	//Load projection matrix data
 	std::stringstream calib_path;
 	calib_path << "D:/Hans/Documents/SampleSet/SampleSet/MVS Data/Calibration/cal18/pos_"
 		<< std::setw(3) << std::setfill('0') << index << ".txt";
 
+	cv::Mat P;
+
 	std::ifstream calib_file(calib_path.str());
 	if (calib_file.is_open()) {
-		view->P = cv::Mat(3, 4, CV_64F);
+		P = cv::Mat(3, 4, CV_64F);
 		for (int i = 0; i < 3; i++) {
 			for (int j = 0; j < 4; j++) {
-				calib_file >> view->P.at<double>(i, j);
+				calib_file >> P.at<double>(i, j);
 			}
 		}
 	}
 	else {
 		std::cout << "Failed to open " << calib_path.str() << std::endl;
+		return nullptr;
 	}
+
+	mvs::View* view = new mvs::View(img, P, BETA_1);
+
+	return view;
 }
 
 
@@ -80,15 +92,11 @@ int main(int argc, char* argv[]) {
 		printTime();
 		std::cout << "Loading view " << i << "..." << std::endl;
 
-		mvs::View* view = new mvs::View;
-		loadView(view, "scan6", i);
-		//view->S.resize(view->img.cols / BETA_1 * view->img.rows / BETA_1);
-		//view->T.resize(view->img.cols / BETA_1 * view->img.rows / BETA_1);
-		view->S = std::vector<std::vector<std::vector<mvs::Patch*>>>(view->img.cols / BETA_1, std::vector<std::vector<mvs::Patch*>>(view->img.rows / BETA_1));
-		view->T = std::vector<std::vector<std::vector<mvs::Patch*>>>(view->img.cols / BETA_1, std::vector<std::vector<mvs::Patch*>>(view->img.rows / BETA_1));
-		
-		views.push_back(view);
+		views.push_back(loadView("scan6", i));
 	}
+
+	///////////////////////////////////////////////////////////////////////////
+	//Load bundler files
 
 	/*if (argc < 2) {
 		std::cout << "Missing input folder";
@@ -101,7 +109,7 @@ int main(int argc, char* argv[]) {
 	std::string input_dir = argv[1];
 	if (input_dir.back() != '/' || input_dir.back() != '\\')
 		input_dir += '/';
-	
+
 	std::ifstream bundle_file(input_dir + std::string("bundle/bundle.out"));
 	std::ifstream list_file(input_dir + std::string("prepare/list.txt"));
 
@@ -140,7 +148,7 @@ int main(int argc, char* argv[]) {
 		perspective_mat.at<double>(0, 0) = focal_length;
 		perspective_mat.at<double>(1, 1) = focal_length;
 		perspective_mat.at<double>(2, 2) = 1;
-		
+
 		//Load camera location
 		cv::Mat pose_mat(3, 4, CV_64F);
 		bundle_file >> pose_mat.at<double>(0, 0) >> pose_mat.at<double>(0, 1) >> pose_mat.at<double>(0, 2);
@@ -175,7 +183,7 @@ int main(int argc, char* argv[]) {
 			for (int j = 0; j < (view->img.cols - 2 * IMAGE_BORDER) / BETA_2; j++) {
 				float max_values[ETA] = { 0 };
 				cv::Point cell_features[ETA];
-				
+
 				for (int m = 0; m < BETA_2; m++) {
 					for (int n = 0; n < BETA_2; n++) {
 						float harris_value = harris_img.at<float>(i * BETA_2 + m + IMAGE_BORDER, j * BETA_2 + n + IMAGE_BORDER);
@@ -200,7 +208,7 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				
+
 				for (int k = 0; k < ETA; k++) {
 					if (max_values[k] > 1e-7) {
 						mvs::Feature detected_feature;
@@ -238,11 +246,10 @@ int main(int argc, char* argv[]) {
 		//Iterate over ever detected feature
 		for (auto& feature : features[view]) {
 			//Check if a feature was already detected in the region the feature lies
-			//int cell = (int)feature.pos.x / BETA_1 + (int)feature.pos.y / BETA_1 * rows / BETA_1;
 			if (!view->T[feature.pos.x / BETA_1][feature.pos.y / BETA_1].empty()) {
 				continue;
 			}
-			
+
 			mvs::Ray3 ray = mvs::castRay(view, feature.pos);
 			feature.normal = -ray.direction;
 			ray.direction /= camera_front.ddot(ray.direction);
@@ -313,8 +320,8 @@ int main(int argc, char* argv[]) {
 
 				//Find photoconsistent sets
 				patch.T.clear();
-				//patch.T.push_back(view);
-				//patch.S.push_back(view);
+				patch.T.push_back(view);
+				patch.S.push_back(view);
 				for (auto& neighbor : views) {
 					if (neighbor == view)
 						continue;
@@ -333,16 +340,14 @@ int main(int argc, char* argv[]) {
 					mvs::Patch* p_patch = &patches.back();
 
 					for (auto& neighbor : patch.T) {
-						cv::Point2i projection = cv::Point2i(mvs::projectPoint(neighbor, patch.position) / BETA_1);
-						//int cell_index = (int)feature.pos.x / BETA_1 + (int)feature.pos.y / BETA_1 * rows / BETA_1;
-						neighbor->T[projection.x][projection.y].push_back(p_patch);
-						neighbor->S[projection.x][projection.y].push_back(p_patch);
+						cv::Point2i cell = cv::Point2i(mvs::projectPoint(neighbor, patch.position) / BETA_1);
+						neighbor->T[cell.x][cell.y].push_back(p_patch);
+						neighbor->S[cell.x][cell.y].push_back(p_patch);
 					}
 
 					for (auto& neighbor : patch.S) {
-						cv::Point2i projection = cv::Point2i(mvs::projectPoint(neighbor, patch.position) / BETA_1);
-						//int cell_index = (int)feature.pos.x / BETA_1 + (int)feature.pos.y / BETA_1 * rows / BETA_1;
-						neighbor->S[projection.x][projection.y].push_back(p_patch);
+						cv::Point2i cell = cv::Point2i(mvs::projectPoint(neighbor, patch.position) / BETA_1);
+						neighbor->S[cell.x][cell.y].push_back(p_patch);
 					}
 
 					p_patch->S.insert(p_patch->S.end(), p_patch->T.begin(), p_patch->T.end());
@@ -382,6 +387,9 @@ int main(int argc, char* argv[]) {
 				}*/
 
 			}
+
+			//if (patches.size() >= 10)
+			//	break;
 		}
 
 		printTime();
@@ -389,6 +397,10 @@ int main(int argc, char* argv[]) {
 
 		//break;
 	}
+
+	//Compute depthmaps
+	for (auto& view : views)
+		view->computeDepthmap();
 
 	///////////////////////////////////////////////////////////////////////////
 	//Expansion
@@ -407,11 +419,11 @@ int main(int argc, char* argv[]) {
 				int cell_x = cell_pos.x - 1 + i % 3;
 				int cell_y = cell_pos.y - 1 + i / 3;
 
-				if (cell_x < 0 || cell_x >= view->T.size() || cell_y < 0 || cell_y >= view->T.front().size())
+				if (cell_x < 0 || cell_x >= view->grid_w || cell_y < 0 || cell_y >= view->grid_h)
 					continue; //Skip if cell is out of range
 
 				if (view->T[cell_x][cell_y].size() > 0)
-					continue;
+					continue; //Skip if cell already has a patch
 
 				mvs::Patch new_patch;
 				new_patch.source = patch->source;
@@ -425,43 +437,107 @@ int main(int argc, char* argv[]) {
 
 				new_patch.optimize();
 
-				new_patch.T = { new_patch.source };
-
-				for (auto& neighbor : views) {
-					if (neighbor == view)
-						continue;
-
-					double ncc_score = mvs::ncc<MU>(&new_patch, view, neighbor);
-
-					if (ncc_score > ALPHA_1)
-						new_patch.T.push_back(neighbor);
-				}
+				//Find views where the patch should be visible
+				new_patch.T.clear();
+				new_patch.findVisible(&views, ALPHA_1);
 
 				if (new_patch.T.size() >= GAMMA) {
 					//Accept patch
 					patches.push_back(new_patch);
-					mvs::Patch* p_patch = &patches.back();
+					patches.back().registerViews();
+					/*mvs::Patch* p_patch = &patches.back();
 
 					for (auto& neighbor : new_patch.T) {
 						cv::Point2i projection = cv::Point2i(mvs::projectPoint(neighbor, new_patch.position) / BETA_1);
 						neighbor->T[projection.x][projection.y].push_back(p_patch);
-						neighbor->S[projection.x][projection.y].push_back(p_patch);
 					}
 
 					for (auto& neighbor : new_patch.S) {
 						cv::Point2i projection = cv::Point2i(mvs::projectPoint(neighbor, new_patch.position) / BETA_1);
 						neighbor->S[projection.x][projection.y].push_back(p_patch);
-					}
-
-					p_patch->S.insert(p_patch->S.end(), p_patch->T.begin(), p_patch->T.end());
+					}*/
 				}
 			}
 		}
-		mvs::Patch new_patch = *patch;
-		patches.push_back(new_patch);
 	}
+
 	printTime();
 	std::cout << "Finished. Total patches: " << patches.size() << std::endl;
+
+	///////////////////////////////////////////////////////////////////////////
+	//Filtering
+
+	printTime();
+	std::cout << "Filtering..." << std::endl;
+
+	int filtered_patches = 0;
+	std::list<mvs::Patch>::iterator patch = patches.begin();
+	while (patch != patches.end()) {
+		//Filter occluding patches
+		double score_1 = patch->T.size() * patch->meanNcc();
+		double score_2 = 0;
+
+		for (auto& view : patch->T) {
+			cv::Point2i cell = mvs::projectPoint(view, patch->position) / view->cell_size;
+			if (view->depthmap[cell.x][cell.y].second != &(*patch))
+				continue;
+			
+			for (auto& ocluded_patch : view->T[cell.x][cell.y]) {
+				if (ocluded_patch != &(*patch))
+					score_2 += ocluded_patch->meanNcc();
+			}
+		}
+
+		if (score_1 < score_2) {
+			patch->remove();
+			patches.erase(patch++);
+			filtered_patches++;
+			continue;
+		}
+
+		//Filter occluded patches
+		//...
+
+		//Regularization
+		int total_patches = 0;
+		int nadjacent_patches = 0;
+		for (auto& view : patch->S) {
+			cv::Point2i cell_pos = cv::Point2i(mvs::projectPoint(view, patch->position) / BETA_1);
+
+			//Check 8-connected neighboring cells
+			for (int i = 0; i < 9; i++) {
+				int cell_x = cell_pos.x - 1 + i % 3;
+				int cell_y = cell_pos.y - 1 + i / 3;
+
+				if (cell_x < 0 || cell_x >= view->grid_w || cell_y < 0 || cell_y >= view->grid_h)
+					continue; //Skip if cell is out of range
+
+				for (auto& adjacent : view->S[cell_x][cell_y]) {
+					total_patches++;
+
+					cv::Point3d distance_vector = patch->position - adjacent->position;
+					double distance = cv::abs(distance_vector.dot(patch->normal)) + cv::abs(distance_vector.dot(adjacent->normal));
+					double mid_depth = ((patch->position + adjacent->position) / 2).dot(view->orientation);
+					double margin = 2 * mvs::getProjectedDistance(view, mid_depth);
+
+					if (distance < margin)
+						nadjacent_patches++;
+				}
+			}
+		}
+
+		if (total_patches > 0 && 4 * nadjacent_patches / total_patches == 0) {
+			patch->remove();
+			patches.erase(patch++);
+			filtered_patches++;
+			continue;
+		}
+
+		patch++;
+	}
+
+	printTime();
+	std::cout << "Removed " << filtered_patches << " patches" << std::endl;
 
 	///////////////////////////////////////////////////////////////////////////
 	//Write output file

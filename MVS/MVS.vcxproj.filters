@@ -24,6 +24,9 @@
     <ClCompile Include="furukawa.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="mvs\View.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mvs\basic.h">

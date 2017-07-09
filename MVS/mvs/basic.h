@@ -4,8 +4,7 @@
 #include <opencv2\opencv.hpp>
 
 namespace mvs {
-	struct View;
-	struct Feature;
+	class View;
 	class Patch;
 
 
@@ -26,21 +25,15 @@ namespace mvs {
 		cv::Point2d pos;
 		cv::Point3d normal;
 	};
-
-
-	struct View {
-		cv::Mat img;
-		cv::Mat P;
-
-		std::vector<std::vector<std::vector<Patch*>>> T;
-		std::vector<std::vector<std::vector<Patch*>>> S;
-	};
 	
 	
 	cv::Point3d getCameraPosition(View*);
 
 
 	cv::Point3d getCameraOrientation(View*);
+
+
+	double getProjectedDistance(View*, double);
 
 
 	std::vector<View*> findClosest(std::vector<View*>*, View*, int);

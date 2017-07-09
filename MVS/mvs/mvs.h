@@ -4,3 +4,4 @@
 #include "photoconsistency.h"
 
 #include "Patch.h"
+#include "View.h"

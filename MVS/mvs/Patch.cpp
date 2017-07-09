@@ -8,6 +8,7 @@
 using namespace mvs;
 
 
+//Optimization constants
 const int N_PHI = 7;
 const int N_THETA[N_PHI] = {3, 5, 9, 13, 17, 20};
 const int N_POS = 5;
@@ -118,6 +119,85 @@ void Patch::optimize() {
 	normal /= cv::sqrt(normal.ddot(normal));
 
 	position += cv::Point3d(x[2] * projection_dir);
+}
+
+
+void Patch::remove() {
+	//Remove pointers from view grids
+	for (auto& view : T) {
+		cv::Point2i cell = mvs::projectPoint(view, position) / view->cell_size;
+
+		view->T[cell.x][cell.y].erase(std::find(view->T[cell.x][cell.y].begin(), view->T[cell.x][cell.y].end(), this));
+		view->computeDepthmap(cell.x, cell.y);
+	}
+
+	for (auto& view : S) {
+		cv::Point2i cell = mvs::projectPoint(view, position) / view->cell_size;
+		view->S[cell.x][cell.y].erase(std::find(view->S[cell.x][cell.y].begin(), view->S[cell.x][cell.y].end(), this));
+	}
+}
+
+
+void Patch::findVisible(std::vector<View*>* views, double alpha) {
+	for (auto& view : *views) {
+		cv::Point2i cell = mvs::projectPoint(view, position) / view->cell_size;
+
+		if (cell.x < 0 || cell.x >= view->grid_w || cell.y < 0 || cell.y >= view->grid_h)
+			continue;
+
+		if (view->depthmap[cell.x][cell.y].second == nullptr) {
+			S.push_back(view);
+			continue;
+		}
+
+		double depth = (position - view->position).dot(view->orientation);
+		double min_depth = view->depthmap[cell.x][cell.y].first;
+
+		//There's most certainly a better way of getting the focal length...
+		//cv::Point2d projection = projectPoint(view, view->depthmap[cell.x][cell.y].second->position);
+		//Ray3 ray = castRay(view, projection + cv::Point2d(view->cell_size, 0));
+		//ray.direction /= view->orientation.dot(ray.direction);
+		//cv::Point3d delta_vec = ray.start + ray.direction * min_depth - view->depthmap[cell.x][cell.y].second->position;
+		//double delta = cv::sqrt(delta_vec.dot(delta_vec));
+
+		double delta = getProjectedDistance(view, min_depth);
+
+		if (depth < min_depth + delta) {
+			S.push_back(view);
+		}
+	}
+
+	for (auto& view : S) {
+		cv::Point2i cell = mvs::projectPoint(view, position) / view->cell_size;
+
+		if (cell.x < 0 || cell.x >= view->grid_w || cell.y < 0 || cell.y >= view->grid_h)
+			continue;
+
+		if (ncc<5>(this, source, view) > alpha) {
+			T.push_back(view);
+		}
+	}
+}
+
+
+void Patch::registerViews() {
+	for (auto& view : T) {
+		cv::Point2i cell = cv::Point2i(mvs::projectPoint(view, position) / view->cell_size);
+		view->T[cell.x][cell.y].push_back(this);
+		view->computeDepthmap(cell.x, cell.y);
+	}
+
+	for (auto& view : S) {
+		cv::Point2i cell = cv::Point2i(mvs::projectPoint(view, position) / view->cell_size);
+		view->S[cell.x][cell.y].push_back(this);
+	}
+}
+
+
+double mvs::Patch::meanNcc() {
+	double x[3] = { 0 };
+
+	return meanNcc(3, x, nullptr, this);
 }
 
 

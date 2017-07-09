@@ -1,7 +1,9 @@
 #pragma once
 
-#include "basic.h"
 #include <opencv2\opencv.hpp>
+
+#include "basic.h"
+#include "View.h"
 
 namespace mvs {
 	inline cv::Vec3d bilinearSample(cv::Mat* source, cv::Point2f pos) {

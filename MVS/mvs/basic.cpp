@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "Patch.h"
+#include "View.h"
 
 using namespace mvs;
 
@@ -31,6 +32,18 @@ cv::Point3d mvs::getCameraOrientation(View* view) {
 	result /= cv::sqrt(result.dot(result));
 
 	return result;
+}
+
+
+double mvs::getProjectedDistance(View* view, double depth) {
+	cv::Point2d center = cv::Point2d(view->img.cols / 2, view->img.rows / 2);
+
+	Ray3 r1 = castRay(view, center);
+	Ray3 r2 = castRay(view, center + cv::Point2d(1, 0));
+
+	cv::Point3d delta_vector = r1.direction * depth - r2.direction * depth;
+
+	return cv::sqrt(delta_vector.dot(delta_vector));
 }
 
 
