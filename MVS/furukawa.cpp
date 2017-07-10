@@ -20,7 +20,7 @@ const int ETA = 4;          //Features per grid cell
 const int MU = 5;           //Size of the grid used for photoconsistency calculation
 const int GAMMA = 3;        //Amount of photoconsistent patches needed for detection
 const double ALPHA_0 = 0.4; //Weak match threshold
-const double ALPHA_1 = 0.7; //Strong match threshold
+double ALPHA_1 = 0.7;       //Strong match threshold
 
 //Additional parameters
 
@@ -68,6 +68,83 @@ mvs::View* loadView(std::string scan, int index) {
 	return view;
 }
 
+//Function to write patches to PLY format file
+bool writePly(std::list<mvs::Patch>* patches, std::string filename, bool normalize = false) {
+	std::ofstream output_file(filename, std::ios::binary);
+	if (output_file.is_open()) {
+		//Write header
+		output_file << "ply" << std::endl;
+		output_file << "format binary_little_endian 1.0" << std::endl;
+		output_file << "element vertex " << patches->size() << std::endl;
+		output_file << "property float x" << std::endl;
+		output_file << "property float y" << std::endl;
+		output_file << "property float z" << std::endl;
+		output_file << "property float nx" << std::endl;
+		output_file << "property float ny" << std::endl;
+		output_file << "property float nz" << std::endl;
+		output_file << "property uchar red" << std::endl;
+		output_file << "property uchar green" << std::endl;
+		output_file << "property uchar blue" << std::endl;
+		output_file << "element face 0" << std::endl;
+		output_file << "property list uchar int vertex_indices" << std::endl;
+		output_file << "end_header" << std::endl;
+
+		float mean_x = 0;
+		float mean_y = 0;
+		float mean_z = 0;
+
+		if (normalize) {
+			for (auto& patch : *patches) {
+				mean_x += patch.position.x;
+				mean_y += patch.position.y;
+				mean_z += patch.position.z;
+			}
+
+			mean_x /= patches->size();
+			mean_y /= patches->size();
+			mean_z /= patches->size();
+		}
+
+		//Write data
+		for (auto& patch : *patches) {
+			cv::Point2d projection = mvs::projectPoint(patch.source, patch.position);
+			if (projection.x < 0)
+				projection.x = 0;
+			else if (projection.x > (patch.source->img.cols - 2))
+				projection.x = patch.source->img.cols - 2;
+			if (projection.y < 0)
+				projection.y = 0;
+			else if (projection.y >(patch.source->img.rows - 2))
+				projection.y = patch.source->img.rows - 2;
+
+			cv::Vec3b color = mvs::bilinearSample(&patch.source->img, projection);
+
+			float x = (float)patch.position.x - mean_x;
+			float y = (float)patch.position.y - mean_y;
+			float z = (float)patch.position.z - mean_z;
+			float nx = (float)patch.normal[0];
+			float ny = (float)patch.normal[1];
+			float nz = (float)patch.normal[2];
+
+			output_file.write(reinterpret_cast<const char*>(&x), sizeof(x));
+			output_file.write(reinterpret_cast<const char*>(&y), sizeof(y));
+			output_file.write(reinterpret_cast<const char*>(&z), sizeof(z));
+			output_file.write(reinterpret_cast<const char*>(&nx), sizeof(nx));
+			output_file.write(reinterpret_cast<const char*>(&ny), sizeof(ny));
+			output_file.write(reinterpret_cast<const char*>(&nz), sizeof(nz));
+			output_file.write((const char*)&color[2], 1);
+			output_file.write((const char*)&color[1], 1);
+			output_file.write((const char*)&color[0], 1);
+		}
+
+		output_file.close();
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
 
 void printTime() {
 	static time_t start_time = time(0);
@@ -92,7 +169,9 @@ int main(int argc, char* argv[]) {
 		printTime();
 		std::cout << "Loading view " << i << "..." << std::endl;
 
-		views.push_back(loadView("scan6", i));
+		mvs::View* view = loadView("scan6", i);
+		if (view != nullptr)
+			views.push_back(view);
 	}
 
 	///////////////////////////////////////////////////////////////////////////
@@ -354,38 +433,6 @@ int main(int argc, char* argv[]) {
 
 					break;
 				}
-
-				/*patch.T.push_back(view);
-				patch.S.push_back(view);
-
-				for (auto& neighbor : views) {
-					if (neighbor == view)
-						continue;
-
-					double ncc_score = mvs::ncc<MU>(&patch, view, neighbor);
-
-					if (ncc_score > ALPHA_0) {
-						patch.S.push_back(neighbor);
-					}
-					if (ncc_score > ALPHA_1) {
-						patch.T.push_back(neighbor);
-					}
-				}
-
-				if (patch.T.size() >= GAMMA) {
-					//Refine patch normal
-					patch.optimize();
-
-					patches.push_back(patch);
-
-					for (auto neighbor : patch.T) {
-						cv::Point2d projection = mvs::projectPoint(neighbor, patch.position);
-						int cell_index = feature.pos.x / BETA_1 + feature.pos.y / BETA_1 * rows / BETA_1;
-						neighbor->C[cell_index].push_back(&patches.back());
-					}
-					break;
-				}*/
-
 			}
 
 			//if (patches.size() >= 10)
@@ -402,209 +449,164 @@ int main(int argc, char* argv[]) {
 	for (auto& view : views)
 		view->computeDepthmap();
 
-	///////////////////////////////////////////////////////////////////////////
-	//Expansion
-	printTime();
-	std::cout << "Expanding patches..." << std::endl;
-	auto last_patch = --(patches.end());
-	for (auto patch = patches.begin(); patch != last_patch; patch++) {
-		for (auto& view : patch->T) {
-			cv::Point2i cell_pos = cv::Point2i(mvs::projectPoint(view, patch->position) / BETA_1);
-
-			//Check 8-connected neighboring cells
-			for (int i = 0; i < 9; i++) {
-				if (i == 4)
-					continue; //Skip current cell
-
-				int cell_x = cell_pos.x - 1 + i % 3;
-				int cell_y = cell_pos.y - 1 + i / 3;
-
-				if (cell_x < 0 || cell_x >= view->grid_w || cell_y < 0 || cell_y >= view->grid_h)
-					continue; //Skip if cell is out of range
-
-				if (view->T[cell_x][cell_y].size() > 0)
-					continue; //Skip if cell already has a patch
-
-				mvs::Patch new_patch;
-				new_patch.source = patch->source;
-				new_patch.tangent_1 = patch->tangent_1;
-				new_patch.tangent_2 = patch->tangent_2;
-				new_patch.projection_dir = new_patch.projection_dir;
-				new_patch.T = patch->T;
-
-				mvs::Ray3 ray = mvs::castRay(view, cv::Point2d((double)cell_x + 0.5, (double)cell_y + 0.5) * BETA_1);
-				new_patch.position = mvs::intersect(ray, &(*patch));
-
-				new_patch.optimize();
-
-				//Find views where the patch should be visible
-				new_patch.T.clear();
-				new_patch.findVisible(&views, ALPHA_1);
-
-				if (new_patch.T.size() >= GAMMA) {
-					//Accept patch
-					patches.push_back(new_patch);
-					patches.back().registerViews();
-					/*mvs::Patch* p_patch = &patches.back();
-
-					for (auto& neighbor : new_patch.T) {
-						cv::Point2i projection = cv::Point2i(mvs::projectPoint(neighbor, new_patch.position) / BETA_1);
-						neighbor->T[projection.x][projection.y].push_back(p_patch);
-					}
-
-					for (auto& neighbor : new_patch.S) {
-						cv::Point2i projection = cv::Point2i(mvs::projectPoint(neighbor, new_patch.position) / BETA_1);
-						neighbor->S[projection.x][projection.y].push_back(p_patch);
-					}*/
-				}
-			}
-		}
-	}
-
-	printTime();
-	std::cout << "Finished. Total patches: " << patches.size() << std::endl;
-
-	///////////////////////////////////////////////////////////////////////////
-	//Filtering
-
-	printTime();
-	std::cout << "Filtering..." << std::endl;
-
-	int filtered_patches = 0;
-	std::list<mvs::Patch>::iterator patch = patches.begin();
-	while (patch != patches.end()) {
-		//Filter occluding patches
-		double score_1 = patch->T.size() * patch->meanNcc();
-		double score_2 = 0;
-
-		for (auto& view : patch->T) {
-			cv::Point2i cell = mvs::projectPoint(view, patch->position) / view->cell_size;
-			if (view->depthmap[cell.x][cell.y].second != &(*patch))
-				continue;
-			
-			for (auto& ocluded_patch : view->T[cell.x][cell.y]) {
-				if (ocluded_patch != &(*patch))
-					score_2 += ocluded_patch->meanNcc();
-			}
-		}
-
-		if (score_1 < score_2) {
-			patch->remove();
-			patches.erase(patch++);
-			filtered_patches++;
-			continue;
-		}
-
-		//Filter occluded patches
-		//...
-
-		//Regularization
-		int total_patches = 0;
-		int nadjacent_patches = 0;
-		for (auto& view : patch->S) {
-			cv::Point2i cell_pos = cv::Point2i(mvs::projectPoint(view, patch->position) / BETA_1);
-
-			//Check 8-connected neighboring cells
-			for (int i = 0; i < 9; i++) {
-				int cell_x = cell_pos.x - 1 + i % 3;
-				int cell_y = cell_pos.y - 1 + i / 3;
-
-				if (cell_x < 0 || cell_x >= view->grid_w || cell_y < 0 || cell_y >= view->grid_h)
-					continue; //Skip if cell is out of range
-
-				for (auto& adjacent : view->S[cell_x][cell_y]) {
-					total_patches++;
-
-					cv::Point3d distance_vector = patch->position - adjacent->position;
-					double distance = cv::abs(distance_vector.dot(patch->normal)) + cv::abs(distance_vector.dot(adjacent->normal));
-					double mid_depth = ((patch->position + adjacent->position) / 2).dot(view->orientation);
-					double margin = 2 * mvs::getProjectedDistance(view, mid_depth);
-
-					if (distance < margin)
-						nadjacent_patches++;
-				}
-			}
-		}
-
-		if (total_patches > 0 && 4 * nadjacent_patches / total_patches == 0) {
-			patch->remove();
-			patches.erase(patch++);
-			filtered_patches++;
-			continue;
-		}
-
-		patch++;
-	}
-
-	printTime();
-	std::cout << "Removed " << filtered_patches << " patches" << std::endl;
-
-	///////////////////////////////////////////////////////////////////////////
-	//Write output file
 	printTime();
 	std::cout << "Writing PLY file..." << std::endl;
-	std::ofstream output_file("output.ply", std::ios::binary);
-	if (output_file.is_open()) {
-		//Write header
-		output_file << "ply" << std::endl;
-		output_file << "format binary_little_endian 1.0" << std::endl;
-		output_file << "element vertex " << patches.size() << std::endl;
-		output_file << "property float x" << std::endl;
-		output_file << "property float y" << std::endl;
-		output_file << "property float z" << std::endl;
-		output_file << "property float nx" << std::endl;
-		output_file << "property float ny" << std::endl;
-		output_file << "property float nz" << std::endl;
-		output_file << "property uchar red" << std::endl;
-		output_file << "property uchar green" << std::endl;
-		output_file << "property uchar blue" << std::endl;
-		output_file << "element face 0" << std::endl;
-		output_file << "property list uchar int vertex_indices" << std::endl;
-		output_file << "end_header" << std::endl;
+	writePly(&patches, "output_matching.ply");
 
-		float mean_x = 0;
-		float mean_y = 0;
-		float mean_z = 0;
-		//float max = 0;
-		/*for (auto& patch : patches) {
-			mean_x += patch.position.x;
-			mean_y += patch.position.y;
-			mean_z += patch.position.z;
+	///////////////////////////////////////////////////////////////////////////
+	//Expansion and filtering iterations
+	auto last_patch = patches.begin();
+
+	for (int k = 1; k <= 3; k++) {
+		///////////////////////////////////////////////////////////////////////////
+		//Expansion
+		printTime();
+		std::cout << "Iteration " << k << std::endl;
+
+		printTime();
+		std::cout << "Expanding patches..." << std::endl;
+		auto first_patch = last_patch;
+		last_patch = --(patches.end());
+		for (auto patch = first_patch; patch != last_patch; patch++) {
+			for (auto& view : patch->T) {
+				cv::Point2i cell_pos = cv::Point2i(mvs::projectPoint(view, patch->position) / BETA_1);
+
+				//Check 8-connected neighboring cells
+				for (int i = 0; i < 9; i++) {
+					if (i == 4)
+						continue; //Skip current cell
+
+					int cell_x = cell_pos.x - 1 + i % 3;
+					int cell_y = cell_pos.y - 1 + i / 3;
+
+					if (cell_x < 0 || cell_x >= view->grid_w || cell_y < 0 || cell_y >= view->grid_h)
+						continue; //Skip if cell is out of range
+
+					if (view->T[cell_x][cell_y].size() > 0)
+						continue; //Skip if cell already has a patch
+
+					mvs::Patch new_patch;
+					new_patch.source = patch->source;
+					new_patch.tangent_1 = patch->tangent_1;
+					new_patch.tangent_2 = patch->tangent_2;
+					new_patch.projection_dir = new_patch.projection_dir;
+					new_patch.T = patch->T;
+
+					mvs::Ray3 ray = mvs::castRay(view, cv::Point2d((double)cell_x + 0.5, (double)cell_y + 0.5) * BETA_1);
+					new_patch.position = mvs::intersect(ray, &(*patch));
+
+					new_patch.optimize();
+
+					//Find views where the patch should be visible
+					new_patch.T.clear();
+					new_patch.findVisible(&views, ALPHA_1);
+
+					if (new_patch.T.size() >= GAMMA) {
+						//Accept patch
+						patches.push_back(new_patch);
+						patches.back().registerViews();
+					}
+				}
+			}
 		}
 
-		mean_x /= patches.size();
-		mean_y /= patches.size();
-		mean_z /= patches.size();*/
+		printTime();
+		std::cout << "Finished. Total patches: " << patches.size() << std::endl;
 
-		//Write data
-		for (auto& patch : patches) {
-			cv::Vec3b color = mvs::bilinearSample(&patch.source->img, mvs::projectPoint(patch.source, patch.position));
+		printTime();
+		std::cout << "Writing PLY file..." << std::endl;
+		writePly(&patches, "output_expansion_" + std::to_string(k) + ".ply");
 
-			float x = (float)patch.position.x - mean_x;
-			float y = (float)patch.position.y - mean_y;
-			float z = (float)patch.position.z - mean_z;
-			float nx = (float)patch.normal[0];
-			float ny = (float)patch.normal[1];
-			float nz = (float)patch.normal[2];
+		///////////////////////////////////////////////////////////////////////////
+		//Filtering
 
-			output_file.write(reinterpret_cast<const char*>(&x), sizeof(x));
-			output_file.write(reinterpret_cast<const char*>(&y), sizeof(y));
-			output_file.write(reinterpret_cast<const char*>(&z), sizeof(z));
-			output_file.write(reinterpret_cast<const char*>(&nx), sizeof(nx));
-			output_file.write(reinterpret_cast<const char*>(&ny), sizeof(ny));
-			output_file.write(reinterpret_cast<const char*>(&nz), sizeof(nz));
-			output_file.write((const char*)&color[2], 1);
-			output_file.write((const char*)&color[1], 1);
-			output_file.write((const char*)&color[0], 1);
+		printTime();
+		std::cout << "Filtering..." << std::endl;
+
+		int filtered_patches = 0;
+		std::list<mvs::Patch>::iterator patch = patches.begin();
+		while (patch != patches.end()) {
+			//Filter occluded patches
+			patch->remove();
+			patch->findVisible(&views, ALPHA_1);
+			if (patch->T.size() < GAMMA) {
+				patches.erase(patch++);
+				filtered_patches++;
+				continue;
+			}
+			else {
+				patch->registerViews();
+			}
+
+			//Filter occluding patches
+			double score_1 = patch->T.size() * patch->meanNcc();
+			double score_2 = 0;
+
+			for (auto& view : patch->T) {
+				cv::Point2i cell = mvs::projectPoint(view, patch->position) / view->cell_size;
+				if (view->depthmap[cell.x][cell.y].second != &(*patch))
+					continue;
+
+				for (auto& ocluded_patch : view->T[cell.x][cell.y]) {
+					if (ocluded_patch != &(*patch))
+						score_2 += ocluded_patch->meanNcc();
+				}
+			}
+
+			if (score_1 < score_2) {
+				patch->remove();
+				patches.erase(patch++);
+				filtered_patches++;
+				continue;
+			}
+
+			//Regularization
+			int total_patches = 0;
+			int nadjacent_patches = 0;
+			for (auto& view : patch->S) {
+				cv::Point2i cell_pos = cv::Point2i(mvs::projectPoint(view, patch->position) / BETA_1);
+
+				//Check 8-connected neighboring cells
+				for (int i = 0; i < 9; i++) {
+					int cell_x = cell_pos.x - 1 + i % 3;
+					int cell_y = cell_pos.y - 1 + i / 3;
+
+					if (cell_x < 0 || cell_x >= view->grid_w || cell_y < 0 || cell_y >= view->grid_h)
+						continue; //Skip if cell is out of range
+
+					for (auto& adjacent : view->S[cell_x][cell_y]) {
+						total_patches++;
+
+						cv::Point3d distance_vector = patch->position - adjacent->position;
+						double distance = cv::abs(distance_vector.dot(patch->normal)) + cv::abs(distance_vector.dot(adjacent->normal));
+						double mid_depth = ((patch->position + adjacent->position) / 2).dot(view->orientation);
+						double margin = 2 * mvs::getProjectedDistance(view, mid_depth);
+
+						if (distance < margin)
+							nadjacent_patches++;
+					}
+				}
+			}
+
+			if (total_patches > 0 && 4 * nadjacent_patches < total_patches) {
+				patch->remove();
+				patches.erase(patch++);
+				filtered_patches++;
+				continue;
+			}
+
+			patch++;
 		}
 
-		output_file.close();
-		std::cout << "\t\tFinished." << std::endl;
+		printTime();
+		std::cout << "Removed " << filtered_patches << " patches. Total patches: " << patches.size() << std::endl;
+
+		printTime();
+		std::cout << "Writing PLY file..." << std::endl;
+		writePly(&patches, "output_filter_" + std::to_string(k) + ".ply");
+
+		ALPHA_1 -= 0.2;
 	}
-	else {
-		std::cout << "\t\tFailed to write file.";
-	}
-	
 
 	//Draw patches
 	display_image = views[0]->img;
